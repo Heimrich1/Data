@@ -1,0 +1,52 @@
+name: Dateien in Release übernehmen
+
+# Übergabe von Dateien an ein Release, für Umgebungen, die Releases nicht
+# selbst beschreiben dürfen:
+#   1. Branch upload/<release-tag> anlegen, Dateien unter upload/ committen
+#      (jede Datei < 100 MB, große Mengen in mehreren Pushes).
+#   2. Optional upload/DELETE mit Asset-Namen (eine pro Zeile), die aus dem
+#      Release entfernt werden sollen.
+#   3. Zuletzt upload/READY committen und pushen: Erst das startet diesen
+#      Workflow. Er lädt alle Dateien hoch (vorhandene werden ersetzt) und
+#      löscht danach den Branch.
+
+on:
+  push:
+    branches: ["upload/**"]
+    paths: ["upload/READY"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-upload
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Hochladen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME#upload/}"
+          gh release view "$tag" >/dev/null 2>&1 || \
+            gh release create "$tag" --latest=false --target main --title "$tag" --notes "Daten-Release $tag."
+          files=$(find upload -maxdepth 1 -type f ! -name READY ! -name DELETE ! -name NOTES.md | sort)
+          echo "$(echo "$files" | grep -c .) Dateien"
+          for f in $files; do
+            gh release upload "$tag" "$f" --clobber
+          done
+          if [ -f upload/NOTES.md ]; then gh release edit "$tag" --notes-file upload/NOTES.md; fi
+          if [ -f upload/DELETE ]; then
+            while read -r name; do
+              [ -n "$name" ] && gh release delete-asset "$tag" "$name" -y || true
+            done < upload/DELETE
+          fi
+          echo "Dateien im Release $tag: $(gh release view "$tag" --json assets -q '.assets | length')"
+      - name: Übergabe-Branch löschen
+        if: success()
+        run: git push origin --delete "$GITHUB_REF_NAME"
