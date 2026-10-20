@@ -1,0 +1,66 @@
+name: Aktien-Daten aktualisieren (Alpaca)
+
+# Holt die neuen Handelstage seit dem Datenstand im Release "stock-data"
+# (Tageskerzen, 1/5/30-Minute, Schlagzeilen, Quartalszahlen-Termine) und
+# ersetzt die geänderten Dateien im Release. Details: scripts/stock_update.py.
+# Braucht die Repository-Secrets APCA_API_KEY_ID und APCA_API_SECRET_KEY;
+# ohne sie wird der Lauf übersprungen.
+
+on:
+  workflow_dispatch:
+    inputs:
+      until:
+        description: "Letzter Tag (YYYY-MM-DD), leer = letzter vollständiger Handelstag"
+        required: false
+        default: ""
+  schedule:
+    - cron: "41 6 * * 6"   # samstags 06:41 UTC
+
+permissions:
+  contents: write
+
+concurrency:
+  group: stock-data
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: stock-data
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Secrets vorhanden?
+        id: keys
+        env:
+          KEY: ${{ secrets.APCA_API_KEY_ID }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::warning::Secrets APCA_API_KEY_ID/APCA_API_SECRET_KEY fehlen, Lauf übersprungen."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.keys.outputs.ok == 'true'
+      - uses: actions/setup-python@v5
+        if: steps.keys.outputs.ok == 'true'
+        with:
+          python-version: "3.12"
+      - name: Aktualisieren und hochladen
+        if: steps.keys.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
+          APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
+          UNTIL: ${{ inputs.until }}
+        run: |
+          pip install --quiet pandas pyarrow
+          gh release download "$RELEASE_TAG" -D src
+          args=(src out)
+          if [ -n "$UNTIL" ]; then args+=(--until "$UNTIL"); fi
+          python3 scripts/stock_update.py "${args[@]}"
+          if [ -d out ] && [ -n "$(ls out)" ]; then
+            gh release upload "$RELEASE_TAG" out/* --clobber
+          fi
