@@ -305,14 +305,26 @@ def pack(items, jobs, today, budget=JOB_BUDGET_MIN):
     return [b for b in buckets if b]
 
 
+MIN_ASSET_BYTES = 20_000  # a full H1 year is ~250 KB, M1 ~13 MB; smaller = broken download
+
+
 def read_assets(path):
-    """Read 'name<TAB>updated_at' lines (from gh api)."""
+    """Read 'name<TAB>updated_at[<TAB>size]' lines (from gh api).
+
+    Suspiciously small files of past years are left out, so the planner
+    downloads them again.
+    """
     assets = {}
     if path and Path(path).exists():
         for line in Path(path).read_text().splitlines():
-            if "\t" in line:
-                name, upd = line.split("\t", 1)
-                assets[name] = dt.datetime.fromisoformat(upd.replace("Z", "+00:00"))
+            parts = line.split("\t")
+            if len(parts) < 2:
+                continue
+            name, upd = parts[0], parts[1]
+            if len(parts) > 2 and int(parts[2]) < MIN_ASSET_BYTES:
+                print(f"{name}: only {parts[2]} bytes, planned again", file=sys.stderr)
+                continue
+            assets[name] = dt.datetime.fromisoformat(upd.replace("Z", "+00:00"))
     return assets
 
 

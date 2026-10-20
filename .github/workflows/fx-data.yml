@@ -75,7 +75,7 @@ jobs:
               --notes "M1- und H1-Kerzen mit Bid und Ask in UTC, eine Parquet-Datei je Symbol, Zeitrahmen und Jahr (<SYMBOL>_<JAHR>_<tf>.parquet). Erzeugt von .github/workflows/fx-data.yml."
           id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq .id)
           gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$id/assets?per_page=100" \
-            --jq '.[] | [.name, .updated_at] | @tsv' > assets.tsv
+            --jq '.[] | [.name, .updated_at, (.size | tostring)] | @tsv' > assets.tsv
           args=(--plan --assets assets.tsv --jobs 4 --symbols "$SYMBOLS" --tfs "$TFS" --years "$YEARS")
           if [ "$FULL" = "true" ]; then args+=(--full); fi
           python3 scripts/fx_fetch.py "${args[@]}" >> "$GITHUB_OUTPUT"
