@@ -1,0 +1,104 @@
+name: FX-Daten (Dukascopy M1/H1)
+
+# Lädt Bid/Ask-Kerzen von Dukascopy und legt je Symbol, Zeitrahmen und Jahr
+# eine Parquet-Datei im Release "fx-data" ab.
+#
+# Dukascopy drosselt auf etwa 0,1 Dateien/s pro Rechner. Jeder Lauf plant
+# deshalb die noch fehlenden Einträge (zuerst H1, dann M1 vom neuesten Jahr
+# rückwärts), verteilt sie auf bis zu 20 Jobs mit je ~5 h Budget und lädt
+# jede fertige Jahresdatei sofort hoch. Erneut starten setzt fort, wo der
+# letzte Lauf aufgehört hat.
+#
+# Läuft alle 6 Stunden, bis alles geladen ist; danach wird nur noch das
+# laufende Jahr wöchentlich erneuert (Planer überspringt Fertiges).
+# Actions-Minuten sind kostenlos, solange das Repo öffentlich ist. Wird es
+# privat gestellt, den Zeitplan unten vorher entfernen!
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "Symbole, komma-getrennt (leer = alle)"
+        required: false
+        default: ""
+      tfs:
+        description: "Zeitrahmen: h1,m1 / h1 / m1"
+        required: false
+        default: "h1,m1"
+      years:
+        description: "Nur diese Jahre, z. B. 2025 oder 2003-2010 (leer = alle)"
+        required: false
+        default: ""
+      full:
+        description: "Ausgewählte Einträge neu laden"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "17 */6 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fx-data
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: fx-data
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Release anlegen und offene Einträge planen
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SYMBOLS: ${{ inputs.symbols }}
+          TFS: ${{ inputs.tfs || 'h1,m1' }}
+          YEARS: ${{ inputs.years }}
+          FULL: ${{ inputs.full }}
+        run: |
+          pip install --quiet pandas pyarrow
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || \
+            gh release create "$RELEASE_TAG" --latest=false \
+              --title "FX-Daten (Dukascopy, Bid/Ask)" \
+              --notes "M1- und H1-Kerzen mit Bid und Ask in UTC, eine Parquet-Datei je Symbol, Zeitrahmen und Jahr (<SYMBOL>_<JAHR>_<tf>.parquet). Erzeugt von .github/workflows/fx-data.yml."
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq .id)
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$id/assets?per_page=100" \
+            --jq '.[] | [.name, .updated_at] | @tsv' > assets.tsv
+          args=(--plan --assets assets.tsv --jobs 20 --symbols "$SYMBOLS" --tfs "$TFS" --years "$YEARS")
+          if [ "$FULL" = "true" ]; then args+=(--full); fi
+          python3 scripts/fx_fetch.py "${args[@]}" >> "$GITHUB_OUTPUT"
+
+  fetch:
+    needs: plan
+    if: needs.plan.outputs.count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        job: ${{ fromJson(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Abhängigkeiten
+        run: pip install --quiet pandas pyarrow
+      - name: Job ${{ matrix.job.id }} laden und hochladen
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ITEMS: ${{ matrix.job.items }}
+        run: |
+          echo "$ITEMS" | tr ',' '\n'
+          python3 scripts/fx_fetch.py --items "$ITEMS" --budget-min 320 --upload "$RELEASE_TAG"
