@@ -74,7 +74,7 @@ jobs:
           id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq .id)
           gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$id/assets?per_page=100" \
             --jq '.[] | [.name, .updated_at] | @tsv' > assets.tsv
-          args=(--plan --assets assets.tsv --jobs 20 --symbols "$SYMBOLS" --tfs "$TFS" --years "$YEARS")
+          args=(--plan --assets assets.tsv --jobs 18 --symbols "$SYMBOLS" --tfs "$TFS" --years "$YEARS")
           if [ "$FULL" = "true" ]; then args+=(--full); fi
           python3 scripts/fx_fetch.py "${args[@]}" >> "$GITHUB_OUTPUT"
 
@@ -85,7 +85,7 @@ jobs:
     timeout-minutes: 355
     strategy:
       fail-fast: false
-      max-parallel: 20
+      max-parallel: 18
       matrix:
         job: ${{ fromJson(needs.plan.outputs.matrix) }}
     steps:
