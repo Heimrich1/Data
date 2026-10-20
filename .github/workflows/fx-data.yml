@@ -3,9 +3,11 @@ name: FX-Daten (Dukascopy M1/H1)
 # Lädt Bid/Ask-Kerzen von Dukascopy und legt je Symbol, Zeitrahmen und Jahr
 # eine Parquet-Datei im Release "fx-data" ab.
 #
-# Dukascopy drosselt auf etwa 0,1 Dateien/s pro Rechner. Jeder Lauf plant
-# deshalb die noch fehlenden Einträge (zuerst H1, dann M1 vom neuesten Jahr
-# rückwärts), verteilt sie auf bis zu 20 Jobs mit je ~5 h Budget und lädt
+# Dukascopy drosselt GitHub-Rechner insgesamt auf etwa 0,4 Dateien/s; mehr
+# parallele Jobs bringen nichts, sondern nur Timeouts (am 2026-10-20 gemessen:
+# 16 Jobs zusammen ~0,37 Dateien/s). Jeder Lauf plant deshalb die noch
+# fehlenden Einträge (zuerst H1, dann M1 vom neuesten Jahr rückwärts),
+# verteilt sie auf 4 Jobs mit je ~5 h Budget und lädt
 # jede fertige Jahresdatei sofort hoch. Erneut starten setzt fort, wo der
 # letzte Lauf aufgehört hat.
 #
@@ -74,7 +76,7 @@ jobs:
           id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq .id)
           gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$id/assets?per_page=100" \
             --jq '.[] | [.name, .updated_at] | @tsv' > assets.tsv
-          args=(--plan --assets assets.tsv --jobs 18 --symbols "$SYMBOLS" --tfs "$TFS" --years "$YEARS")
+          args=(--plan --assets assets.tsv --jobs 4 --symbols "$SYMBOLS" --tfs "$TFS" --years "$YEARS")
           if [ "$FULL" = "true" ]; then args+=(--full); fi
           python3 scripts/fx_fetch.py "${args[@]}" >> "$GITHUB_OUTPUT"
 
@@ -85,7 +87,7 @@ jobs:
     timeout-minutes: 355
     strategy:
       fail-fast: false
-      max-parallel: 18
+      max-parallel: 4
       matrix:
         job: ${{ fromJson(needs.plan.outputs.matrix) }}
     steps:
