@@ -83,10 +83,12 @@ def asset_name(symbol, year, tf):
 
 # ---------------------------------------------------------------- download + decode
 
-def fetch_bytes(url, patience_s=1800):
+def fetch_bytes(url, patience_s=None):
     """GET with backoff for up to `patience_s` seconds (Dukascopy throttles with
-    503 for minutes at a time). Returns b"" for periods without data (404)."""
+    503 for minutes at a time; FX_PATIENCE, default 10 min). Returns b"" for
+    periods without data (404); raises when the patience is used up."""
     delay = 2.0
+    patience_s = float(os.environ.get("FX_PATIENCE", 600)) if patience_s is None else patience_s
     deadline = time.time() + patience_s
     attempt = 0
     while True:
@@ -134,16 +136,25 @@ def decode(raw, start, divisor):
 decode_day = decode  # backwards-compatible name
 
 
+def _try_fetch(url):
+    try:
+        return fetch_bytes(url)
+    except RuntimeError as e:
+        print(f"skip {e}", flush=True)
+        return None
+
+
 def _fetch_many(symbol, side, jobs):
-    """jobs: list of (url, start). Returns concatenated candles."""
+    """jobs: list of (url, start). Returns (candles, starts whose file could not be fetched)."""
     divisor = INSTRUMENTS[symbol][1]
     with ThreadPoolExecutor(int(os.environ.get("FX_WORKERS", WORKERS))) as ex:
-        raws = list(ex.map(fetch_bytes, [u for u, _ in jobs]))
-    parts = [decode(r, s, divisor) for r, (_, s) in zip(raws, jobs)]
+        raws = list(ex.map(_try_fetch, [u for u, _ in jobs]))
+    failed = [s for r, (_, s) in zip(raws, jobs) if r is None]
+    parts = [decode(r, s, divisor) for r, (_, s) in zip(raws, jobs) if r is not None]
     parts = [p for p in parts if p is not None and len(p)]
     if not parts:
-        return pd.DataFrame(columns=["time"] + OHLC + ["volume"])
-    return pd.concat(parts, ignore_index=True)
+        return pd.DataFrame(columns=["time"] + OHLC + ["volume"]), failed
+    return pd.concat(parts, ignore_index=True), failed
 
 
 def fetch_side(symbol, side, days):
@@ -202,10 +213,24 @@ def days_between(start, end):
     return [start + dt.timedelta(days=i) for i in range((end - start).days)]
 
 
+def fetch_days(symbol, days):
+    """M1 bid/ask for the given days. Returns (bars, days that could not be fetched)."""
+    bid, fb = fetch_side(symbol, "bid", days)
+    ask, fa = fetch_side(symbol, "ask", days)
+    failed = sorted(set(fb) | set(fa))
+    df = merge_sides(bid, ask)
+    if failed:  # keep only complete days (a day with one side missing is dropped)
+        bad = {pd.Timestamp(d) for d in failed}
+        df = df[~df["time"].dt.tz_convert(None).dt.normalize().isin(bad)].reset_index(drop=True)
+    return df, failed
+
+
 def fetch_range(symbol, start, end):
-    """M1 bid/ask for [start, end)."""
-    days = days_between(start, end)
-    return merge_sides(fetch_side(symbol, "bid", days), fetch_side(symbol, "ask", days))
+    """M1 bid/ask for [start, end); raises if any day could not be fetched."""
+    df, failed = fetch_days(symbol, days_between(start, end))
+    if failed:
+        raise RuntimeError(f"{symbol}: {len(failed)} days not fetched, first {failed[0]}")
+    return df
 
 
 def fetch_hours(symbol, start, end, today):
@@ -217,9 +242,17 @@ def fetch_hours(symbol, start, end, today):
         m = dt.date(m.year + (m.month == 12), m.month % 12 + 1, 1)
     sides = {}
     for side in ("bid", "ask"):
-        parts = [fetch_side_hours(symbol, side, months)] if months else []
+        parts, failed = [], []
+        if months:
+            df, f = fetch_side_hours(symbol, side, months)
+            parts.append(df)
+            failed += f
         if end > month0:
-            parts.append(minutes_to_hours(fetch_side(symbol, side, days_between(max(start, month0), end))))
+            df, f = fetch_side(symbol, side, days_between(max(start, month0), end))
+            parts.append(minutes_to_hours(df))
+            failed += f
+        if failed:
+            raise RuntimeError(f"{symbol} h1 {side}: {len(failed)} files not fetched, first {failed[0]}")
         parts = [p for p in parts if len(p)]
         sides[side] = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=["time"] + OHLC + ["volume"])
     df = merge_sides(sides["bid"], sides["ask"])
@@ -227,30 +260,72 @@ def fetch_hours(symbol, start, end, today):
     return df[(df.time >= t0) & (df.time < t1)].reset_index(drop=True)
 
 
-def fetch_item(symbol, tf, year, today, out_dir):
+MAX_MISSING_SHARE = 0.25  # more failed days than this: keep nothing, retry the whole year
+
+
+def missing_name(symbol, year, tf):
+    return f"{symbol}_{year}_{tf}.missing.txt"
+
+
+def _release_download(tag, name, out_dir):
+    subprocess.run(["gh", "release", "download", tag, "-p", name, "-D", str(out_dir), "--clobber"], check=True)
+    return Path(out_dir) / name
+
+
+def fetch_item(symbol, tf, year, today, out_dir, repair_from=None):
+    """Download one (symbol, tf, year). Returns the files to upload.
+
+    M1 tolerates single days that stay unreachable: the year is stored without
+    them and <name>.missing.txt lists them. With repair_from (a release tag)
+    the existing file and list are downloaded and only those days fetched.
+    """
     start = max(dt.date(year, 1, 1), first_minute(symbol))
     end = min(dt.date(year + 1, 1, 1), today)  # today's data is not complete yet
     if start >= end:
         print(f"{symbol} {year} {tf}: outside the available range", flush=True)
-        return None
+        return []
     t = time.time()
-    df = fetch_range(symbol, start, end) if tf == "m1" else fetch_hours(symbol, start, end, today)
+    out_dir = Path(out_dir)
+    path = out_dir / asset_name(symbol, year, tf)
+    miss = out_dir / missing_name(symbol, year, tf)
+    if tf != "m1":
+        df, failed = fetch_hours(symbol, start, end, today), []
+    elif repair_from:
+        old = pd.read_parquet(_release_download(repair_from, path.name, out_dir))
+        todo = [dt.date.fromisoformat(x) for x in
+                _release_download(repair_from, miss.name, out_dir).read_text().split()]
+        new, failed = fetch_days(symbol, todo)
+        df = pd.concat([old, new], ignore_index=True).drop_duplicates("time").sort_values("time")
+        df = df.reset_index(drop=True)
+        print(f"{symbol} {year} m1 repair: {len(todo) - len(failed)} of {len(todo)} days fetched", flush=True)
+    else:
+        days = days_between(start, end)
+        df, failed = fetch_days(symbol, days)
+        if len(failed) > MAX_MISSING_SHARE * len(days):
+            raise RuntimeError(f"{symbol} {year} m1: {len(failed)} of {len(days)} days not fetched")
     if df.empty:
         print(f"{symbol} {year} {tf}: no data", flush=True)
-        return None
+        return []
     check(df, symbol)
-    path = Path(out_dir) / asset_name(symbol, year, tf)
     write_parquet(df, path)
     spread = (df["ask_close"] - df["bid_close"]).median()
     print(f"{symbol} {year} {tf}: {len(df)} bars {df.time.iloc[0]} .. {df.time.iloc[-1]} "
           f"median spread {spread:.6g} -> {path.stat().st_size / 1e6:.1f} MB "
-          f"in {time.time() - t:.0f}s", flush=True)
-    return path
+          f"in {time.time() - t:.0f}s" + (f", {len(failed)} days still missing" if failed else ""), flush=True)
+    files = [path]
+    if failed:
+        miss.write_text("\n".join(d.isoformat() for d in failed) + "\n")
+        files.append(miss)
+    elif repair_from:
+        subprocess.run(["gh", "release", "delete-asset", repair_from, miss.name, "-y"], check=False)
+    return files
 
 
 # ---------------------------------------------------------------- planning
 
 def estimate_minutes(symbol, tf, year, today):
+    if tf.endswith("r"):
+        return 15  # repair: a handful of days
     start = max(dt.date(year, 1, 1), first_minute(symbol))
     end = min(dt.date(year + 1, 1, 1), today)
     days = max((end - start).days, 0)
@@ -280,6 +355,9 @@ def plan(assets, today, symbols=None, tfs=TFS, full=False, years=None):
                     continue
                 upd = assets.get(asset_name(sym, year, tf))
                 year_end = dt.datetime(year + 1, 1, 1, tzinfo=dt.timezone.utc)
+                if missing_name(sym, year, tf) in assets and upd is not None and not full:
+                    items.append((sym, tf + "r", year))  # repair the listed days only
+                    continue
                 if full or upd is None:
                     todo = True
                 elif year == today.year:
@@ -321,7 +399,7 @@ def read_assets(path):
             if len(parts) < 2:
                 continue
             name, upd = parts[0], parts[1]
-            if len(parts) > 2 and int(parts[2]) < MIN_ASSET_BYTES:
+            if len(parts) > 2 and int(parts[2]) < MIN_ASSET_BYTES and name.endswith(".parquet"):
                 print(f"{name}: only {parts[2]} bytes, planned again", file=sys.stderr)
                 continue
             assets[name] = dt.datetime.fromisoformat(upd.replace("Z", "+00:00"))
@@ -418,15 +496,18 @@ def main():
         if (time.time() - t0) / 60 + estimate_minutes(sym, tf, int(year), today) > args.budget_min:
             print(f"budget reached, leaving {it} and the rest for the next run", flush=True)
             break
+        repair = tf.endswith("r")
         try:
-            path = fetch_item(sym, tf, int(year), today, args.out)
+            files = fetch_item(sym, tf.rstrip("r"), int(year), today, args.out,
+                               repair_from=args.upload if repair else None)
         except Exception as e:  # keep going; the next scheduled run retries it
             print(f"FAIL {it}: {e}", flush=True)
             failed.append(it)
             continue
-        if path and args.upload:
-            subprocess.run(["gh", "release", "upload", args.upload, str(path), "--clobber"], check=True)
-            path.unlink()
+        if args.upload:
+            for path in files:
+                subprocess.run(["gh", "release", "upload", args.upload, str(path), "--clobber"], check=True)
+                path.unlink()
     if failed:
         # Not fatal: the planner of the next scheduled run picks these up again.
         print(f"::warning::{len(failed)} Einträge fehlgeschlagen, nächster Lauf versucht sie erneut: "
