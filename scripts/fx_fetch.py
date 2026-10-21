@@ -6,8 +6,9 @@ candle files (.bi5, LZMA) come straight from datafeed.dukascopy.com:
 - M1: one file per day and side,
 - H1: one file per month and side (the running month is built from M1 days).
 
-Dukascopy throttles to roughly 0.1 files/s per client, so a full M1 history
-(~235k files) takes many runner-hours. The workflow therefore works through
+Dukascopy throttles GitHub runners to roughly 0.06 files/s per job (~0.25/s
+for 4 jobs), so a full M1 history (~200k files without Saturdays) takes many
+runner-hours. The workflow therefore works through
 a plan of (symbol, timeframe, year) items in time-boxed jobs and is re-run on
 a schedule until everything is there: H1 first, then M1 from the newest year
 backwards.
@@ -46,14 +47,14 @@ INSTRUMENTS = {
     "NZDUSD": ("2003-08-03", 1e5, (0.4, 1.0)),
     "USDCAD": ("2003-08-03", 1e5, (0.9, 1.7)),
     "USDCHF": ("2003-05-04", 1e5, (0.6, 1.8)),
-    "USDJPY": ("2003-05-04", 1e3, (70, 170)),
-    "EURJPY": ("2003-08-03", 1e3, (90, 190)),
-    "GBPJPY": ("2003-08-03", 1e3, (110, 260)),
-    "AUDJPY": ("2003-11-30", 1e3, (50, 120)),
+    "USDJPY": ("2003-05-04", 1e3, (70, 220)),
+    "EURJPY": ("2003-08-03", 1e3, (90, 250)),
+    "GBPJPY": ("2003-08-03", 1e3, (110, 300)),
+    "AUDJPY": ("2003-11-30", 1e3, (50, 150)),
     "EURGBP": ("2003-08-03", 1e5, (0.6, 1.0)),
-    "EURCHF": ("2003-08-03", 1e5, (0.9, 1.7)),
-    "XAUUSD": ("2003-05-05", 1e3, (300, 6000)),
-    "XAGUSD": ("2003-05-04", 1e3, (3, 100)),
+    "EURCHF": ("2003-08-03", 1e5, (0.7, 1.7)),
+    "XAUUSD": ("2003-05-05", 1e3, (250, 12000)),
+    "XAGUSD": ("2003-05-04", 1e3, (3, 250)),
 }
 SYMBOLS = list(INSTRUMENTS)
 TFS = ("h1", "m1")
@@ -68,7 +69,9 @@ WORKERS = 4
 RETRY_STATUS = {202, 403, 429, 500, 502, 503, 504}
 STATS = {"requests": 0, "retries": 0}
 
-# Planning: estimated minutes per item at ~0.1 files/s, job budget and refresh age.
+# Planning: estimated minutes per item at the measured ~0.06 files/s per job
+# (4 jobs, 2026-10-21), job budget and refresh age.
+JOB_RATE = 0.06
 JOB_BUDGET_MIN = 300
 REFRESH_DAYS = 7
 
@@ -210,7 +213,10 @@ def write_parquet(df, path):
 
 
 def days_between(start, end):
-    return [start + dt.timedelta(days=i) for i in range((end - start).days)]
+    """Days in [start, end) without Saturdays (UTC): FX and metals do not trade then
+    and Dukascopy's Saturday files hold no candles."""
+    days = (start + dt.timedelta(days=i) for i in range((end - start).days))
+    return [d for d in days if d.weekday() != 5]
 
 
 def fetch_days(symbol, days):
@@ -328,12 +334,12 @@ def estimate_minutes(symbol, tf, year, today):
         return 15  # repair: a handful of days
     start = max(dt.date(year, 1, 1), first_minute(symbol))
     end = min(dt.date(year + 1, 1, 1), today)
-    days = max((end - start).days, 0)
+    days = len(days_between(start, end)) if end > start else 0
     if tf == "m1":
         files = 2 * days
     else:
         files = 2 * (days / 30.4 + (today.day if year == today.year else 0))
-    return 3 + files / 0.1 / 60
+    return 3 + files / JOB_RATE / 60
 
 
 def plan(assets, today, symbols=None, tfs=TFS, full=False, years=None):

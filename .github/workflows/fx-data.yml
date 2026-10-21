@@ -9,9 +9,11 @@ name: FX-Daten (Dukascopy M1/H1)
 # fehlenden Einträge (zuerst H1, dann M1 vom neuesten Jahr rückwärts),
 # verteilt sie auf 4 Jobs mit je ~5 h Budget und lädt
 # jede fertige Jahresdatei sofort hoch. Erneut starten setzt fort, wo der
-# letzte Lauf aufgehört hat.
+# letzte Lauf aufgehört hat. Ein Job schafft ~0,06 Dateien/s, also ein volles
+# M1-Jahr in ~3 h; ein Lauf dauert deshalb meist nur ~3 h.
 #
-# Läuft alle 6 Stunden, bis alles geladen ist; danach wird nur noch das
+# Läuft alle 2 Stunden (ein Lauf, der noch läuft, lässt den nächsten warten),
+# bis alles geladen ist; danach wird nur noch das
 # laufende Jahr wöchentlich erneuert (Planer überspringt Fertiges).
 # Actions-Minuten sind kostenlos, solange das Repo öffentlich ist. Wird es
 # privat gestellt, den Zeitplan unten vorher entfernen!
@@ -36,7 +38,7 @@ on:
         type: boolean
         default: false
   schedule:
-    - cron: "17 */6 * * *"
+    - cron: "17 */2 * * *"
 
 permissions:
   contents: write
