@@ -32,7 +32,7 @@ on:
         required: false
         default: "h1,m1"
       years:
-        description: "Nur diese Jahre, z. B. 2025 oder 2003-2010 (leer = alle)"
+        description: "Nur diese Jahre, z. B. 2025 oder 2003-2010 (leer = vorübergehend 2013-2026)"
         required: false
         default: ""
       full:
@@ -69,7 +69,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SYMBOLS: ${{ inputs.symbols }}
           TFS: ${{ inputs.tfs || 'h1,m1' }}
-          YEARS: ${{ inputs.years }}
+          # Vorübergehend nur 2013–2026: 2003–2012 lädt der Nutzer vom eigenen
+          # PC (keine GitHub-Drosselung). Danach den Standard wieder entfernen.
+          YEARS: ${{ inputs.years || '2013-2026' }}
           FULL: ${{ inputs.full }}
         run: |
           pip install --quiet pandas pyarrow
