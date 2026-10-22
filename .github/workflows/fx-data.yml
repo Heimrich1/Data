@@ -13,7 +13,8 @@ name: FX-Daten (Dukascopy M1/H1)
 # M1-Jahr in ~3 h; ein Lauf dauert deshalb meist nur ~3 h.
 #
 # Läuft stündlich (ein Lauf, der noch läuft, lässt den nächsten warten; so
-# beginnt nach einem ~3-h-Lauf der nächste spätestens 1 h später),
+# beginnt nach einem ~3-h-Lauf der nächste spätestens 1 h später; zusätzlich
+# stößt jeder erfolgreiche Lauf den nächsten selbst an, Job „next“),
 # bis alles geladen ist; danach wird nur noch das
 # laufende Jahr wöchentlich erneuert (Planer überspringt Fertiges).
 # Actions-Minuten sind kostenlos, solange das Repo öffentlich ist. Wird es
@@ -107,3 +108,23 @@ jobs:
         run: |
           echo "$ITEMS" | tr ',' '\n'
           python3 scripts/fx_fetch.py --items "$ITEMS" --budget-min 320 --upload "$RELEASE_TAG"
+
+  # GitHub lässt stündliche Zeitpläne oft ausfallen (21./22.10.: bis zu 3 h
+  # Pause zwischen Läufen). Deshalb stößt ein erfolgreicher Lauf mit offenen
+  # Einträgen den nächsten selbst an; er wartet, bis dieser Lauf zu Ende ist.
+  next:
+    needs: [plan, fetch]
+    if: needs.plan.outputs.count != '0' && needs.fetch.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Nächsten Lauf anstoßen
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SYMBOLS: ${{ inputs.symbols }}
+          TFS: ${{ inputs.tfs || 'h1,m1' }}
+          YEARS: ${{ inputs.years }}
+        run: |
+          gh workflow run fx-data.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" \
+            -f symbols="$SYMBOLS" -f tfs="$TFS" -f years="$YEARS" -f full=false
