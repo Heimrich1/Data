@@ -111,9 +111,10 @@ def _fetch(url):
         return None
 
 
-def duka_ticks(sym, day, h0, h1):
-    """Ticks of the hours [h0, h1) of `day` (UTC). Returns (ticks, hours that could not be fetched)."""
-    starts = [pd.Timestamp(day, tz="UTC") + pd.Timedelta(hours=h) for h in range(h0, h1)]
+def duka_ticks(sym, day, h0, h1, hours=None):
+    """Ticks of the hours [h0, h1) of `day` (UTC), or only of `hours`. Returns (ticks, hours that could not
+    be fetched)."""
+    starts = [pd.Timestamp(day, tz="UTC") + pd.Timedelta(hours=h) for h in (hours if hours is not None else range(h0, h1))]
     urls = [DUKA_TICKS.format(sym=sym, y=s.year, m=s.month - 1, d=s.day, h=s.hour) for s in starts]
     with ThreadPoolExecutor(int(os.environ.get("FX_WORKERS", 4))) as ex:
         raws = list(ex.map(_fetch, urls))
@@ -169,25 +170,44 @@ def item_name(item):
     return f"duka_{kind}_{sym}_{rest}.parquet"
 
 
-def release_names(tag):
-    """Asset names of the release now (another run may have uploaded items since the plan)."""
+def release_assets(tag):
+    """{name: asset id} of the release now (another run may have uploaded items since the plan). REST only,
+    with explicit pages, because the Link headers of --paginate use numeric repository ids."""
     if not tag:
-        return set()
+        return {}
     repo = os.environ.get("GITHUB_REPOSITORY", "")
-    names, page = [], 1
+    out, page = {}, 1
     try:
         rid = subprocess.run(["gh", "api", f"repos/{repo}/releases/tags/{tag}", "--jq", ".id"],
                              check=True, capture_output=True, text=True).stdout.strip()
-        while True:  # explicit pages (the Link headers of --paginate use numeric repository ids)
-            more = subprocess.run(["gh", "api", f"repos/{repo}/releases/{rid}/assets?per_page=100&page={page}",
-                                   "--jq", ".[].name"], check=True, capture_output=True, text=True).stdout.split()
-            names += more
-            if len(more) < 100:
+        while True:
+            rows = subprocess.run(["gh", "api", f"repos/{repo}/releases/{rid}/assets?per_page=100&page={page}",
+                                   "--jq", '.[] | "\\(.name) \\(.id)"'], check=True, capture_output=True,
+                                  text=True).stdout.splitlines()
+            rows = [r.split() for r in rows if r.strip()]
+            out.update({n: i for n, i in rows})
+            if len(rows) < 100:
                 break
             page += 1
     except subprocess.CalledProcessError:
-        return set()
-    return set(names)
+        return {}
+    return out
+
+
+def release_partial(tag, name, assets):
+    """A partial item of the release: (its data, its list of missing hours), or (None, None)."""
+    miss = name.replace(".parquet", ".missing.txt")
+    if name not in assets or miss not in assets:
+        return None, None
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    got = {}
+    for n in (name, miss):
+        r = subprocess.run(["gh", "api", "-H", "Accept: application/octet-stream",
+                            f"repos/{repo}/releases/assets/{assets[n]}"], capture_output=True)
+        if r.returncode != 0:
+            return None, None
+        got[n] = r.stdout
+    return pd.read_parquet(io.BytesIO(got[name])), got[miss].decode().split()
 
 
 def run_duka(items, out, tag, budget_min):
@@ -196,7 +216,7 @@ def run_duka(items, out, tag, budget_min):
         if (time.time() - t0) / 60 > budget_min:
             print(f"budget reached, leaving {item} and the rest for the next run", flush=True)
             break
-        have = release_names(tag)
+        have = release_assets(tag)
         name = item_name(item)
         if name in have and name.replace(".parquet", ".missing.txt") not in have:
             print(f"skip {item}: complete in the release (another run)", flush=True)
@@ -208,7 +228,14 @@ def run_duka(items, out, tag, budget_min):
             if kind == "t":
                 day, hours = rest.split(":")
                 h0, h1 = map(int, hours.split("-"))
-                df, missing = duka_ticks(sym, day, h0, h1)
+                old, old_missing = release_partial(tag, name, have)
+                if old is not None:  # partial in the release: fetch only its missing hours and merge
+                    new, missing = duka_ticks(sym, day, h0, h1, hours=[int(h) for h in old_missing])
+                    df = (pd.concat([old, new], ignore_index=True).sort_values("time", kind="stable")
+                          .reset_index(drop=True))
+                    print(f"{item}: hours {old_missing} fetched again, still missing {missing}", flush=True)
+                else:
+                    df, missing = duka_ticks(sym, day, h0, h1)
             else:
                 df, missing = duka_candles(sym, kind, rest)
         except Exception as e:  # keep going; the next run retries

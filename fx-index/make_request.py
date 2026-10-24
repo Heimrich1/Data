@@ -59,9 +59,10 @@ def main():
     # Run 10: a fresh job of run 9 fetched 33 tick hours in 5 minutes, the long-running jobs manage about
     # one hour per minute. Six fresh jobs (ids 30-35) take the calibration days 2022-07-28 and 2022-11-23
     # from the end; run 7 keeps 2023-11-30, run 1 comes from the front. All new jobs skip finished items.
-    req = {"run": 10, "probe": False, "misc": False, "yahoo": False, "duka_on": True,
-           "duka_filter": [f"t:{p}:{day}:0-24" for day in calibration_days()[:2] for p in PAIRS],
-           "duka_reverse": True, "duka_jobs": 6, "duka_id0": 30,
+    # Run 11: USDJPY 2023-11-30 lost hour 12 when run 9 fetched the whole day again; partial tick items
+    # now fetch only their missing hours and merge them into the file in the release (one job, id 40).
+    req = {"run": 11, "probe": False, "misc": False, "yahoo": False, "duka_on": True,
+           "duka_filter": ["t:USDJPY:2023-11-30:0-24"], "duka_jobs": 1, "duka_id0": 40,
            "duka": items,
            "second": {"source": "exness", "months": ["2024-08", "2025-04", "2026-09"], "symbols": PAIRS}}
     if "--forward" in sys.argv:
