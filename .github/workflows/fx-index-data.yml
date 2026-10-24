@@ -38,6 +38,7 @@ jobs:
       probe: ${{ steps.plan.outputs.probe }}
       misc: ${{ steps.plan.outputs.misc }}
       yahoo: ${{ steps.plan.outputs.yahoo }}
+      yahoo_symbols: ${{ steps.plan.outputs.yahoo_symbols }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -110,7 +111,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           pip install --quiet pandas pyarrow yfinance
-          python3 scripts/fx_index_fetch.py yahoo --upload "$RELEASE_TAG"
+          python3 scripts/fx_index_fetch.py yahoo --symbols "${{ needs.plan.outputs.yahoo_symbols }}" --upload "$RELEASE_TAG"
 
   duka:
     needs: plan

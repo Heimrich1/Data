@@ -1,8 +1,11 @@
 {
- "run": 3,
+ "run": 4,
  "probe": false,
- "misc": true,
- "yahoo": false,
+ "misc": false,
+ "yahoo": true,
+ "yahoo_symbols": [
+  "DX=F"
+ ],
  "duka_on": false,
  "duka": [
   "h1:DOLLARIDXUSD:2021",
@@ -354,5 +357,42 @@
   "t:CADJPY:2023-11-30:0-24",
   "t:CHFJPY:2023-11-30:0-24"
  ],
- "second": null
+ "second": {
+  "source": "exness",
+  "months": [
+   "2024-08",
+   "2025-04",
+   "2026-09"
+  ],
+  "symbols": [
+   "EURGBP",
+   "EURAUD",
+   "EURNZD",
+   "EURUSD",
+   "EURCAD",
+   "EURCHF",
+   "EURJPY",
+   "GBPAUD",
+   "GBPNZD",
+   "GBPUSD",
+   "GBPCAD",
+   "GBPCHF",
+   "GBPJPY",
+   "AUDNZD",
+   "AUDUSD",
+   "AUDCAD",
+   "AUDCHF",
+   "AUDJPY",
+   "NZDUSD",
+   "NZDCAD",
+   "NZDCHF",
+   "NZDJPY",
+   "USDCAD",
+   "USDCHF",
+   "USDJPY",
+   "CADCHF",
+   "CADJPY",
+   "CHFJPY"
+  ]
+ }
 }

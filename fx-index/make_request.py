@@ -44,8 +44,10 @@ def main():
     # run 1 (2026-10-24): probe, misc, all Dukascopy items. Run 2: second source (Exness; FXCM
     # no longer serves its tick files), Yahoo as its own job, more calendar/benchmark sources;
     # duka_on false so that it does not duplicate the Dukascopy jobs of run 1.
-    req = {"run": 3, "probe": False, "misc": True, "yahoo": False, "duka_on": False, "duka": items,
-           "second": None}
+    # Run 3: misc again (FRED last). Run 4: Yahoo only for DX=F (missing after run 1).
+    req = {"run": 4, "probe": False, "misc": False, "yahoo": True, "yahoo_symbols": ["DX=F"], "duka_on": False,
+           "duka": items,
+           "second": {"source": "exness", "months": ["2024-08", "2025-04", "2026-09"], "symbols": PAIRS}}
     Path(__file__).with_name("request.json").write_text(json.dumps(req, indent=1) + "\n")
     print(f"{len(items)} duka items, calibration days {calibration_days()}")
 

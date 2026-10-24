@@ -343,10 +343,10 @@ def ft_bbdxy(out, tag):
             _save(out, f"ft_bbdxy_{y}.json", raw, tag)
 
 
-def yahoo(out, tag):
+def yahoo(out, tag, tickers=None):
     import yfinance as yf
     now = pd.Timestamp.now(tz="UTC").floor("1D")
-    for tk in YAHOO:
+    for tk in tickers or YAHOO:
         safe = tk.replace("=", "")
         for interval, chunks in (("60m", [dict(period="730d")]),
                                  ("1m", [dict(start=(now - pd.Timedelta(days=d + 7)).date(),
@@ -476,6 +476,7 @@ def plan(request, assets, jobs):
     print(f"probe={'true' if req.get('probe') else 'false'}")
     print(f"misc={'true' if req.get('misc') else 'false'}")
     print(f"yahoo={'true' if req.get('yahoo') else 'false'}")
+    print(f"yahoo_symbols={','.join(req.get('yahoo_symbols', YAHOO))}")
 
 
 def main():
@@ -503,7 +504,7 @@ def main():
             have = {line.split("\t")[0] for line in Path(args.assets).read_text().splitlines() if line.strip()}
         misc(args.out, args.upload, have)
     elif args.task == "yahoo":
-        yahoo(args.out, args.upload)
+        yahoo(args.out, args.upload, [s for s in args.symbols.split(",") if s] if args.symbols != ",".join(PAIRS) else None)
     elif args.task == "duka":
         run_duka([i for i in args.items.split(",") if i], args.out, args.upload, args.budget_min)
     elif args.task == "second":
