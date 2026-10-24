@@ -68,8 +68,9 @@ def main():
     # Run 12: sweep - everything still open after runs 1-11 (three event items that failed, three
     # calibration items with missing hours); no filter, three jobs (ids 50-52).
     # Run 13: the July FOMC days 17-20 UTC (see above); three jobs (ids 60-62).
-    req = {"run": 13, "probe": False, "misc": False, "yahoo": False, "duka_on": True,
-           "duka_filter": fomc_summer, "duka_jobs": 3, "duka_id0": 60,
+    # Run 14: sweep of what is still open after run 13 (no filter, one job, id 70).
+    req = {"run": 14, "probe": False, "misc": False, "yahoo": False, "duka_on": True,
+           "duka_jobs": 1, "duka_id0": 70,
            "duka": items,
            "second": {"source": "exness", "months": ["2024-08", "2025-04", "2026-09"], "symbols": PAIRS}}
     if "--forward" in sys.argv:
