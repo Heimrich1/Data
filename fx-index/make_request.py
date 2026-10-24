@@ -44,6 +44,10 @@ def main():
         items += [f"t:{p}:{day}:{hours}" for p in PAIRS]
     for day in calibration_days():
         items += [f"t:{p}:{day}:0-24" for p in PAIRS]
+    # FOMC 14:00 New York is 18:00 UTC in summer, so 18-20 UTC above has no minutes before the decision;
+    # the two July FOMC days also get 17-20 UTC (run 13).
+    fomc_summer = [f"t:{p}:{day}:17-20" for day in ("2024-07-31", "2025-07-30") for p in PAIRS]
+    items += fomc_summer
     # run 1 (2026-10-24): probe, misc, all Dukascopy items. Run 2: second source (Exness; FXCM
     # no longer serves its tick files), Yahoo as its own job, more calendar/benchmark sources;
     # duka_on false so that it does not duplicate the Dukascopy jobs of run 1.
@@ -63,8 +67,9 @@ def main():
     # now fetch only their missing hours and merge them into the file in the release (one job, id 40).
     # Run 12: sweep - everything still open after runs 1-11 (three event items that failed, three
     # calibration items with missing hours); no filter, three jobs (ids 50-52).
-    req = {"run": 12, "probe": False, "misc": False, "yahoo": False, "duka_on": True,
-           "duka_jobs": 3, "duka_id0": 50,
+    # Run 13: the July FOMC days 17-20 UTC (see above); three jobs (ids 60-62).
+    req = {"run": 13, "probe": False, "misc": False, "yahoo": False, "duka_on": True,
+           "duka_filter": fomc_summer, "duka_jobs": 3, "duka_id0": 60,
            "duka": items,
            "second": {"source": "exness", "months": ["2024-08", "2025-04", "2026-09"], "symbols": PAIRS}}
     if "--forward" in sys.argv:
