@@ -380,16 +380,6 @@ def yahoo(out, tag):
 
 
 def misc(out, tag, have=()):
-    for sid in FRED:
-        if f"fred_{sid}.csv" in have:
-            continue
-        for url in (f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}",
-                    f"https://fred.stlouisfed.org/series/{sid}/downloaddata/{sid}.csv"):
-            status, raw = http_get(url, timeout=240, tries=2)
-            print(f"fred {sid}: {status} {len(raw)} bytes  {url}", flush=True)
-            if status == 200 and raw:
-                _save(out, f"fred_{sid}.csv", raw, tag)
-                break
     for name, url in RAW_URLS.items():
         if name in have:
             continue
@@ -401,6 +391,16 @@ def misc(out, tag, have=()):
         ft_bbdxy(out, tag)
     except Exception as e:
         print(f"FAIL ft: {e}", flush=True)
+    for sid in FRED:  # last: fred.stlouisfed.org often times out for GitHub runners
+        if f"fred_{sid}.csv" in have:
+            continue
+        for url in (f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}",
+                    f"https://fred.stlouisfed.org/series/{sid}/downloaddata/{sid}.csv"):
+            status, raw = http_get(url, timeout=90, tries=1)
+            print(f"fred {sid}: {status} {len(raw)} bytes  {url}", flush=True)
+            if status == 200 and raw:
+                _save(out, f"fred_{sid}.csv", raw, tag)
+                break
 
 
 # ---------------------------------------------------------------- probe
