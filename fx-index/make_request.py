@@ -1,8 +1,11 @@
 """Writes fx-index/request.json for RDT test 48 (rules in research/48_plan.md of Heimrich1/RDT).
 
     python3 fx-index/make_request.py            # from the repo root
+    python3 fx-index/make_request.py --forward  # forward test T5: DXY CFD 2026-10..12 and DX-Y.NYB
 """
+import datetime as dt
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -56,8 +59,15 @@ def main():
            "duka_filter": calib, "duka_reverse": True, "duka_jobs": 3, "duka_id0": 10,
            "duka": items,
            "second": {"source": "exness", "months": ["2024-08", "2025-04", "2026-09"], "symbols": PAIRS}}
+    if "--forward" in sys.argv:
+        # Forward test T5 (after 2026-12-18 17:00 New York): the Dollar Index CFD months of the test
+        # window and the ICE index from Yahoo; everything else is already in the release.
+        fwd = [f"m1:DOLLARIDXUSD:{m}" for m in ["2026-10", "2026-11", "2026-12"]]
+        req = {"run": f"T5 {dt.date.today()}", "probe": False, "misc": False, "yahoo": True,
+               "yahoo_symbols": ["DX-Y.NYB"], "duka_on": True, "duka_filter": fwd, "duka_jobs": 1,
+               "duka": items + fwd}
     Path(__file__).with_name("request.json").write_text(json.dumps(req, indent=1) + "\n")
-    print(f"{len(items)} duka items, calibration days {calibration_days()}")
+    print(f"{len(req['duka'])} duka items, calibration days {calibration_days()}, run {req['run']}")
 
 
 if __name__ == "__main__":
