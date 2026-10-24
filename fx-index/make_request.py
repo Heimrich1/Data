@@ -47,7 +47,8 @@ def main():
     # Run 3: misc again (FRED last). Run 4: Yahoo only for DX=F (missing after run 1).
     # Run 5: the Dollar Index CFD months again (run 1 lost whole months to single throttled days),
     # now stored partially with a list of missing days; two jobs, the tick items stay with run 1.
-    req = {"run": 5, "probe": False, "misc": False, "yahoo": False, "duka_on": True,
+    # Run 6: Yahoo has no DX=F any more ("possibly delisted"); the ICE index DX-Y.NYB instead.
+    req = {"run": 6, "probe": False, "misc": False, "yahoo": True, "yahoo_symbols": ["DX-Y.NYB"], "duka_on": False,
            "duka_filter": ["m1:DOLLARIDXUSD", "h1:DOLLARIDXUSD"], "duka_jobs": 2,
            "duka": items,
            "second": {"source": "exness", "months": ["2024-08", "2025-04", "2026-09"], "symbols": PAIRS}}

@@ -1,9 +1,12 @@
 {
- "run": 5,
+ "run": 6,
  "probe": false,
  "misc": false,
- "yahoo": false,
- "duka_on": true,
+ "yahoo": true,
+ "yahoo_symbols": [
+  "DX-Y.NYB"
+ ],
+ "duka_on": false,
  "duka_filter": [
   "m1:DOLLARIDXUSD",
   "h1:DOLLARIDXUSD"
