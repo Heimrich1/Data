@@ -48,8 +48,12 @@ def main():
     # Run 5: the Dollar Index CFD months again (run 1 lost whole months to single throttled days),
     # now stored partially with a list of missing days; two jobs, the tick items stay with run 1.
     # Run 6: Yahoo has no DX=F any more ("possibly delisted"); the ICE index DX-Y.NYB instead.
-    req = {"run": 6, "probe": False, "misc": False, "yahoo": True, "yahoo_symbols": ["DX-Y.NYB"], "duka_on": False,
-           "duka_filter": ["m1:DOLLARIDXUSD", "h1:DOLLARIDXUSD"], "duka_jobs": 2,
+    # Run 7: the calibration days would not finish within the budget of run 1. Three more jobs
+    # take them from the end (own job ids 10-12); every job now skips items that another run
+    # has already uploaded, so the two runs meet in the middle.
+    calib = [f"t:{p}:{day}:0-24" for day in calibration_days() for p in PAIRS]
+    req = {"run": 7, "probe": False, "misc": False, "yahoo": False, "duka_on": True,
+           "duka_filter": calib, "duka_reverse": True, "duka_jobs": 3, "duka_id0": 10,
            "duka": items,
            "second": {"source": "exness", "months": ["2024-08", "2025-04", "2026-09"], "symbols": PAIRS}}
     Path(__file__).with_name("request.json").write_text(json.dumps(req, indent=1) + "\n")

@@ -169,12 +169,38 @@ def item_name(item):
     return f"duka_{kind}_{sym}_{rest}.parquet"
 
 
+def release_names(tag):
+    """Asset names of the release now (another run may have uploaded items since the plan)."""
+    if not tag:
+        return set()
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    names, page = [], 1
+    try:
+        rid = subprocess.run(["gh", "api", f"repos/{repo}/releases/tags/{tag}", "--jq", ".id"],
+                             check=True, capture_output=True, text=True).stdout.strip()
+        while True:  # explicit pages (the Link headers of --paginate use numeric repository ids)
+            more = subprocess.run(["gh", "api", f"repos/{repo}/releases/{rid}/assets?per_page=100&page={page}",
+                                   "--jq", ".[].name"], check=True, capture_output=True, text=True).stdout.split()
+            names += more
+            if len(more) < 100:
+                break
+            page += 1
+    except subprocess.CalledProcessError:
+        return set()
+    return set(names)
+
+
 def run_duka(items, out, tag, budget_min):
     t0, failed = time.time(), []
     for item in items:
         if (time.time() - t0) / 60 > budget_min:
             print(f"budget reached, leaving {item} and the rest for the next run", flush=True)
             break
+        have = release_names(tag)
+        name = item_name(item)
+        if name in have and name.replace(".parquet", ".missing.txt") not in have:
+            print(f"skip {item}: complete in the release (another run)", flush=True)
+            continue
         kind, sym, rest = item.split(":", 2)
         t = time.time()
         missing = []
@@ -468,7 +494,7 @@ def probe(out):
 # ---------------------------------------------------------------- plan
 
 def plan(request, assets, jobs):
-    """Matrix for the duka jobs: items without a release asset, in request order, round robin."""
+    """Matrix for the duka jobs: items without a release asset, in request order (or reversed), round robin."""
     req = json.loads(Path(request).read_text())
     have = set()
     if assets and Path(assets).exists():
@@ -479,9 +505,12 @@ def plan(request, assets, jobs):
     todo = [it for it in req.get("duka", []) if not done(it)] if req.get("duka_on", True) else []
     if req.get("duka_filter"):  # only items starting with one of these prefixes
         todo = [it for it in todo if any(it.startswith(f) for f in req["duka_filter"])]
+    if req.get("duka_reverse"):  # from the end, to meet a running run in the middle
+        todo = todo[::-1]
     jobs = int(req.get("duka_jobs", jobs))
+    id0 = int(req.get("duka_id0", 0))  # own job ids, so that no job waits for a running one
     buckets = [todo[i::jobs] for i in range(jobs)]
-    matrix = [{"id": i, "items": ",".join(b)} for i, b in enumerate(buckets) if b]
+    matrix = [{"id": id0 + i, "items": ",".join(b)} for i, b in enumerate(buckets) if b]
     second = []
     sec = req.get("second") or {}
     for month in sec.get("months", []):
