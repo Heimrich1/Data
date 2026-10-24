@@ -292,21 +292,59 @@ def run_second(source, month, symbols, out, tag):
 
 YAHOO = ["6E=F", "6J=F", "6B=F", "6A=F", "6C=F", "6S=F", "6N=F", "DX=F"]
 FRED = ["DTWEXAFEGS", "DTWEXBGS", "DTWEXEMEGS"]
+WAYBACK = "https://web.archive.org/web/{ts}id_/{url}"
+BLS_SCHEDULE = "https://www.bls.gov/schedule/news_release/empsit.htm"
+BLS_ARCHIVE = "https://www.bls.gov/bls/news-release/empsit.htm"
 RAW_URLS = {
     "fed_fomccalendars.htm": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
     **{f"fed_fomchistorical{y}.htm": f"https://www.federalreserve.gov/monetarypolicy/fomchistorical{y}.htm"
        for y in range(2013, 2021)},
-    "bls_empsit_schedule.htm": "https://www.bls.gov/schedule/news_release/empsit.htm",
-    "bls_empsit_archive.htm": "https://www.bls.gov/bls/news-release/empsit.htm",
-    "bls_schedule.ics": "https://www.bls.gov/schedule/news_release/bls.ics",
+    "fed_h10_summary.htm": "https://www.federalreserve.gov/releases/h10/summary/default.htm",
+    "fed_h10_package.zip": "https://www.federalreserve.gov/datadownload/Output.aspx?rel=H10&filetype=zip",
     "bis_tov_api.csv": "https://stats.bis.org/api/v1/data/WS_DER_OTC_TOV/all?format=csv",
     "bis_tov_bulk.zip": "https://data.bis.org/static/bulk/WS_DER_OTC_TOV_csv_flat.zip",
+    **{f"bls_schedule_{ts}.htm": WAYBACK.format(ts=ts, url=BLS_SCHEDULE)
+       for ts in ("20240615", "20241215", "20250615", "20251215", "20260615", "20261020")},
+    "bls_archive_latest.htm": WAYBACK.format(ts="20261020", url=BLS_ARCHIVE),
+    "bls_archive_2025.htm": WAYBACK.format(ts="20250701", url=BLS_ARCHIVE),
 }
 
 
-def yahoo(out):
+def _save(out, name, raw, tag):
+    p = Path(out) / name
+    if name.endswith(".csv") and len(raw) > 20e6:
+        p = p.with_suffix(".csv.gz")
+        raw = gzip.compress(raw)
+    p.write_bytes(raw)
+    upload(tag, [p])
+    return p
+
+
+def ft_bbdxy(out, tag):
+    """Bloomberg Dollar Spot Index (BBDXY) daily from markets.ft.com: the tearsheet page
+    holds an internal id, the historical-prices endpoint returns HTML table rows per range."""
+    import re
+    status, page = http_get("https://markets.ft.com/data/indices/tearsheet/historical?s=BBDXY:IOM", timeout=60)
+    print(f"ft page: {status} {len(page)} bytes", flush=True)
+    if status != 200:
+        return
+    _save(out, "ft_bbdxy_page.htm", page, tag)
+    m = re.search(rb'xid(?:&quot;|")\s*:\s*(?:&quot;|")(\d+)', page) or re.search(rb'data-mod-symbol-xid="(\d+)"', page)
+    if not m:
+        print("ft: no xid found", flush=True)
+        return
+    xid = m.group(1).decode()
+    for y in range(2020, 2027):
+        url = (f"https://markets.ft.com/data/equities/ajax/get-historical-prices?startDate={y}/01/01"
+               f"&endDate={y}/12/31&symbol={xid}")
+        status, raw = http_get(url, timeout=60)
+        print(f"ft bbdxy {y}: {status} {len(raw)} bytes", flush=True)
+        if status == 200 and raw:
+            _save(out, f"ft_bbdxy_{y}.json", raw, tag)
+
+
+def yahoo(out, tag):
     import yfinance as yf
-    files = []
     now = pd.Timestamp.now(tz="UTC").floor("1D")
     for tk in YAHOO:
         safe = tk.replace("=", "")
@@ -315,56 +353,54 @@ def yahoo(out):
                                               end=(now - pd.Timedelta(days=d)).date()) for d in (0, 7, 14, 21)])):
             parts = []
             for kw in chunks:
-                for k in range(4):
+                h = None
+                for k in range(5):
                     try:
                         h = yf.Ticker(tk).history(interval=interval, auto_adjust=False, prepost=True, **kw)
-                        break
+                        if h is not None and len(h):
+                            break
                     except Exception as e:
                         print(f"yahoo {tk} {interval} {kw}: {e}", flush=True)
-                        h = None
-                        time.sleep(10 * (k + 1))
+                    time.sleep(20 * (k + 1))
                 if h is not None and len(h):
                     h = h.reset_index()
                     h = h.rename(columns={h.columns[0]: "time"})
                     h["time"] = pd.to_datetime(h["time"], utc=True)
                     parts.append(h)
-                time.sleep(2)
+                time.sleep(3)
             if parts:
                 df = pd.concat(parts, ignore_index=True).drop_duplicates("time").sort_values("time")
                 df.columns = [str(c).lower().replace(" ", "_") for c in df.columns]
                 path = Path(out) / f"yahoo_{interval}_{safe}.parquet"
                 write(df, path)
-                files.append(path)
+                upload(tag, [path])
                 print(f"OK yahoo {tk} {interval}: {len(df)} rows {df.time.min()} .. {df.time.max()}", flush=True)
             else:
                 print(f"FAIL yahoo {tk} {interval}: no rows", flush=True)
-    return files
 
 
-def misc(out):
-    files = []
-    try:
-        files += yahoo(out)
-    except Exception as e:
-        print(f"FAIL yahoo: {e}", flush=True)
+def misc(out, tag, have=()):
     for sid in FRED:
-        status, raw = http_get(f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}", timeout=120)
-        print(f"fred {sid}: {status} {len(raw)} bytes", flush=True)
-        if status == 200 and raw:
-            p = Path(out) / f"fred_{sid}.csv"
-            p.write_bytes(raw)
-            files.append(p)
+        if f"fred_{sid}.csv" in have:
+            continue
+        for url in (f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}",
+                    f"https://fred.stlouisfed.org/series/{sid}/downloaddata/{sid}.csv"):
+            status, raw = http_get(url, timeout=240, tries=2)
+            print(f"fred {sid}: {status} {len(raw)} bytes  {url}", flush=True)
+            if status == 200 and raw:
+                _save(out, f"fred_{sid}.csv", raw, tag)
+                break
     for name, url in RAW_URLS.items():
+        if name in have:
+            continue
         status, raw = http_get(url, timeout=300, headers={"Accept": "*/*"})
         print(f"{name}: {status} {len(raw)} bytes", flush=True)
         if status == 200 and raw:
-            p = Path(out) / name
-            if name.endswith(".csv") and len(raw) > 20e6:
-                p = p.with_suffix(".csv.gz")
-                raw = gzip.compress(raw)
-            p.write_bytes(raw)
-            files.append(p)
-    return files
+            _save(out, name, raw, tag)
+    try:
+        ft_bbdxy(out, tag)
+    except Exception as e:
+        print(f"FAIL ft: {e}", flush=True)
 
 
 # ---------------------------------------------------------------- probe
@@ -422,7 +458,7 @@ def plan(request, assets, jobs):
     have = set()
     if assets and Path(assets).exists():
         have = {line.split("\t")[0] for line in Path(assets).read_text().splitlines() if line.strip()}
-    todo = [it for it in req.get("duka", []) if item_name(it) not in have]
+    todo = [it for it in req.get("duka", []) if item_name(it) not in have] if req.get("duka_on", True) else []
     buckets = [todo[i::jobs] for i in range(jobs)]
     matrix = [{"id": i, "items": ",".join(b)} for i, b in enumerate(buckets) if b]
     second = []
@@ -439,11 +475,12 @@ def plan(request, assets, jobs):
     print(f"nsecond={len(second)}")
     print(f"probe={'true' if req.get('probe') else 'false'}")
     print(f"misc={'true' if req.get('misc') else 'false'}")
+    print(f"yahoo={'true' if req.get('yahoo') else 'false'}")
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("task", choices=["plan", "probe", "misc", "duka", "second"])
+    ap.add_argument("task", choices=["plan", "probe", "misc", "yahoo", "duka", "second"])
     ap.add_argument("--request", default="fx-index/request.json")
     ap.add_argument("--assets")
     ap.add_argument("--jobs", type=int, default=3)
@@ -461,7 +498,12 @@ def main():
     if args.task == "probe":
         upload(args.upload, probe(args.out))
     elif args.task == "misc":
-        upload(args.upload, misc(args.out))
+        have = set()
+        if args.assets and Path(args.assets).exists():
+            have = {line.split("\t")[0] for line in Path(args.assets).read_text().splitlines() if line.strip()}
+        misc(args.out, args.upload, have)
+    elif args.task == "yahoo":
+        yahoo(args.out, args.upload)
     elif args.task == "duka":
         run_duka([i for i in args.items.split(",") if i], args.out, args.upload, args.budget_min)
     elif args.task == "second":

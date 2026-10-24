@@ -20,9 +20,9 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: fx-index
-  cancel-in-progress: false
+# Keine Sperre für den ganzen Workflow: Ein neuer Lauf (z. B. nur Zweitquelle)
+# soll nicht stundenlang auf laufende Dukascopy-Jobs warten. Nur gleich
+# nummerierte Dukascopy-Jobs verschiedener Läufe warten aufeinander.
 
 env:
   RELEASE_TAG: fx-index
@@ -37,6 +37,7 @@ jobs:
       nsecond: ${{ steps.plan.outputs.nsecond }}
       probe: ${{ steps.plan.outputs.probe }}
       misc: ${{ steps.plan.outputs.misc }}
+      yahoo: ${{ steps.plan.outputs.yahoo }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -84,18 +85,41 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Yahoo, FRED, BIS, Fed, BLS
+      - name: FRED, Fed, BIS, BLS (Wayback), FT
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pip install --quiet pandas pyarrow
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq .id)
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$id/assets?per_page=100" \
+            --jq '.[] | [.name, .updated_at, (.size | tostring)] | @tsv' > assets.tsv
+          python3 scripts/fx_index_fetch.py misc --assets assets.tsv --upload "$RELEASE_TAG"
+
+  yahoo:
+    needs: plan
+    if: needs.plan.outputs.yahoo == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Yahoo (CME-Devisenfutures, ICE DX)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           pip install --quiet pandas pyarrow yfinance
-          python3 scripts/fx_index_fetch.py misc --upload "$RELEASE_TAG"
+          python3 scripts/fx_index_fetch.py yahoo --upload "$RELEASE_TAG"
 
   duka:
     needs: plan
     if: needs.plan.outputs.count != '0'
     runs-on: ubuntu-latest
     timeout-minutes: 355
+    concurrency:
+      group: fx-index-duka-${{ matrix.job.id }}
+      cancel-in-progress: false
     strategy:
       fail-fast: false
       max-parallel: 3
