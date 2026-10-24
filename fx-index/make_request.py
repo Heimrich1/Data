@@ -45,7 +45,10 @@ def main():
     # no longer serves its tick files), Yahoo as its own job, more calendar/benchmark sources;
     # duka_on false so that it does not duplicate the Dukascopy jobs of run 1.
     # Run 3: misc again (FRED last). Run 4: Yahoo only for DX=F (missing after run 1).
-    req = {"run": 4, "probe": False, "misc": False, "yahoo": True, "yahoo_symbols": ["DX=F"], "duka_on": False,
+    # Run 5: the Dollar Index CFD months again (run 1 lost whole months to single throttled days),
+    # now stored partially with a list of missing days; two jobs, the tick items stay with run 1.
+    req = {"run": 5, "probe": False, "misc": False, "yahoo": False, "duka_on": True,
+           "duka_filter": ["m1:DOLLARIDXUSD", "h1:DOLLARIDXUSD"], "duka_jobs": 2,
            "duka": items,
            "second": {"source": "exness", "months": ["2024-08", "2025-04", "2026-09"], "symbols": PAIRS}}
     Path(__file__).with_name("request.json").write_text(json.dumps(req, indent=1) + "\n")

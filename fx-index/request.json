@@ -1,12 +1,14 @@
 {
- "run": 4,
+ "run": 5,
  "probe": false,
  "misc": false,
- "yahoo": true,
- "yahoo_symbols": [
-  "DX=F"
+ "yahoo": false,
+ "duka_on": true,
+ "duka_filter": [
+  "m1:DOLLARIDXUSD",
+  "h1:DOLLARIDXUSD"
  ],
- "duka_on": false,
+ "duka_jobs": 2,
  "duka": [
   "h1:DOLLARIDXUSD:2021",
   "h1:DOLLARIDXUSD:2022",

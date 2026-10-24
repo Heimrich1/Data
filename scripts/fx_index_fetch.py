@@ -126,7 +126,9 @@ def duka_ticks(sym, day, h0, h1):
 
 
 def duka_candles(sym, kind, period):
-    """m1: one month of minute candles; h1: one year of hour candles (bid and ask)."""
+    """m1: one month of minute candles; h1: one year of hour candles (bid and ask).
+    Returns (candles, file starts that could not be fetched); days/months with one side
+    missing are left out."""
     div = divisor(sym)
     today = dt.datetime.now(dt.timezone.utc).date()
     if kind == "m1":
@@ -140,18 +142,23 @@ def duka_candles(sym, kind, period):
         y = int(period)
         starts = [dt.date(y, m, 1) for m in range(1, 13) if dt.date(y, m, 1) < dt.date(today.year, today.month, 1)]
         url = fx_fetch.URL_H1
-    sides = {}
+    sides, failed = {}, set()
     for side in ("bid", "ask"):
         urls = [url.format(sym=sym, y=s.year, m=s.month - 1, d=s.day, side=side.upper()) for s in starts]
         with ThreadPoolExecutor(int(os.environ.get("FX_WORKERS", 4))) as ex:
             raws = list(ex.map(_fetch, urls))
-        if any(r is None for r in raws):
-            raise RuntimeError(f"{sym} {kind} {period} {side}: {sum(r is None for r in raws)} files not fetched")
-        parts = [fx_fetch.decode(r, s, div) for r, s in zip(raws, starts)]
+        failed |= {s for r, s in zip(raws, starts) if r is None}
+        parts = [fx_fetch.decode(r, s, div) for r, s in zip(raws, starts) if r is not None]
         parts = [p for p in parts if p is not None and len(p)]
         sides[side] = (pd.concat(parts, ignore_index=True) if parts
                        else pd.DataFrame(columns=["time"] + fx_fetch.OHLC + ["volume"]))
-    return fx_fetch.merge_sides(sides["bid"], sides["ask"])
+    df = fx_fetch.merge_sides(sides["bid"], sides["ask"])
+    if failed and len(df):  # drop periods where only one side arrived
+        unit = "D" if kind == "m1" else "MS"
+        key = df["time"].dt.tz_convert(None).dt.to_period("D" if unit == "D" else "M").dt.start_time
+        bad = {pd.Timestamp(f) for f in failed}
+        df = df[~key.isin(bad)].reset_index(drop=True)
+    return df, sorted(str(f) for f in failed)
 
 
 def item_name(item):
@@ -177,7 +184,7 @@ def run_duka(items, out, tag, budget_min):
                 h0, h1 = map(int, hours.split("-"))
                 df, missing = duka_ticks(sym, day, h0, h1)
             else:
-                df = duka_candles(sym, kind, rest)
+                df, missing = duka_candles(sym, kind, rest)
         except Exception as e:  # keep going; the next run retries
             print(f"FAIL {item}: {e}", flush=True)
             failed.append(item)
@@ -470,6 +477,9 @@ def plan(request, assets, jobs):
         name = item_name(it)
         return name in have and name.replace(".parquet", ".missing.txt") not in have
     todo = [it for it in req.get("duka", []) if not done(it)] if req.get("duka_on", True) else []
+    if req.get("duka_filter"):  # only items starting with one of these prefixes
+        todo = [it for it in todo if any(it.startswith(f) for f in req["duka_filter"])]
+    jobs = int(req.get("duka_jobs", jobs))
     buckets = [todo[i::jobs] for i in range(jobs)]
     matrix = [{"id": i, "items": ",".join(b)} for i, b in enumerate(buckets) if b]
     second = []
