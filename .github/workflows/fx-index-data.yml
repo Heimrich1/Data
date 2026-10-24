@@ -138,7 +138,7 @@ jobs:
         run: |
           pip install --quiet pandas pyarrow
           echo "$ITEMS" | tr ',' '\n' | head -50
-          python3 scripts/fx_index_fetch.py duka --items "$ITEMS" --budget-min 330 --upload "$RELEASE_TAG"
+          FX_PATIENCE=1200 python3 scripts/fx_index_fetch.py duka --items "$ITEMS" --budget-min 330 --upload "$RELEASE_TAG"
 
   second:
     needs: plan

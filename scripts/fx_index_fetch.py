@@ -112,18 +112,17 @@ def _fetch(url):
 
 
 def duka_ticks(sym, day, h0, h1):
-    """Ticks of the hours [h0, h1) of `day` (UTC). Raises if an hour could not be fetched."""
+    """Ticks of the hours [h0, h1) of `day` (UTC). Returns (ticks, hours that could not be fetched)."""
     starts = [pd.Timestamp(day, tz="UTC") + pd.Timedelta(hours=h) for h in range(h0, h1)]
     urls = [DUKA_TICKS.format(sym=sym, y=s.year, m=s.month - 1, d=s.day, h=s.hour) for s in starts]
     with ThreadPoolExecutor(int(os.environ.get("FX_WORKERS", 4))) as ex:
         raws = list(ex.map(_fetch, urls))
-    if any(r is None for r in raws):
-        raise RuntimeError(f"{sym} {day}: {sum(r is None for r in raws)} hour files not fetched")
-    parts = [decode_ticks(r, s, divisor(sym)) for r, s in zip(raws, starts)]
+    failed = [s.hour for r, s in zip(raws, starts) if r is None]
+    parts = [decode_ticks(r, s, divisor(sym)) for r, s in zip(raws, starts) if r is not None]
     parts = [p for p in parts if p is not None and len(p)]
     if not parts:
-        return pd.DataFrame(columns=["time", "bid", "ask", "bid_vol", "ask_vol"])
-    return pd.concat(parts, ignore_index=True)
+        return pd.DataFrame(columns=["time", "bid", "ask", "bid_vol", "ask_vol"]), failed
+    return pd.concat(parts, ignore_index=True), failed
 
 
 def duka_candles(sym, kind, period):
@@ -171,11 +170,12 @@ def run_duka(items, out, tag, budget_min):
             break
         kind, sym, rest = item.split(":", 2)
         t = time.time()
+        missing = []
         try:
             if kind == "t":
                 day, hours = rest.split(":")
                 h0, h1 = map(int, hours.split("-"))
-                df = duka_ticks(sym, day, h0, h1)
+                df, missing = duka_ticks(sym, day, h0, h1)
             else:
                 df = duka_candles(sym, kind, rest)
         except Exception as e:  # keep going; the next run retries
@@ -184,6 +184,14 @@ def run_duka(items, out, tag, budget_min):
             continue
         path = Path(out) / item_name(item)
         write(df, path)
+        miss = path.with_suffix(".missing.txt")
+        if missing:  # partial: keep it, list the hours; the planner fetches the item again
+            miss.write_text("\n".join(map(str, missing)) + "\n")
+            upload(tag, [miss])
+            failed.append(item)
+        elif tag:  # complete now: drop an old list of missing hours
+            subprocess.run(["gh", "release", "delete-asset", tag, miss.name, "-y"], check=False,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         lo = df.iloc[:, 1].min() if len(df) else float("nan")
         hi = df.iloc[:, 1].max() if len(df) else float("nan")
         print(f"OK {item}: {len(df)} rows, first col range {lo:.6g}..{hi:.6g}, "
@@ -458,7 +466,10 @@ def plan(request, assets, jobs):
     have = set()
     if assets and Path(assets).exists():
         have = {line.split("\t")[0] for line in Path(assets).read_text().splitlines() if line.strip()}
-    todo = [it for it in req.get("duka", []) if item_name(it) not in have] if req.get("duka_on", True) else []
+    def done(it):
+        name = item_name(it)
+        return name in have and name.replace(".parquet", ".missing.txt") not in have
+    todo = [it for it in req.get("duka", []) if not done(it)] if req.get("duka_on", True) else []
     buckets = [todo[i::jobs] for i in range(jobs)]
     matrix = [{"id": i, "items": ",".join(b)} for i, b in enumerate(buckets) if b]
     second = []
