@@ -61,8 +61,10 @@ def main():
     # from the end; run 7 keeps 2023-11-30, run 1 comes from the front. All new jobs skip finished items.
     # Run 11: USDJPY 2023-11-30 lost hour 12 when run 9 fetched the whole day again; partial tick items
     # now fetch only their missing hours and merge them into the file in the release (one job, id 40).
-    req = {"run": 11, "probe": False, "misc": False, "yahoo": False, "duka_on": True,
-           "duka_filter": ["t:USDJPY:2023-11-30:0-24"], "duka_jobs": 1, "duka_id0": 40,
+    # Run 12: sweep - everything still open after runs 1-11 (three event items that failed, three
+    # calibration items with missing hours); no filter, three jobs (ids 50-52).
+    req = {"run": 12, "probe": False, "misc": False, "yahoo": False, "duka_on": True,
+           "duka_jobs": 3, "duka_id0": 50,
            "duka": items,
            "second": {"source": "exness", "months": ["2024-08", "2025-04", "2026-09"], "symbols": PAIRS}}
     if "--forward" in sys.argv:

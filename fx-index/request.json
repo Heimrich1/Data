@@ -1,14 +1,11 @@
 {
- "run": 11,
+ "run": 12,
  "probe": false,
  "misc": false,
  "yahoo": false,
  "duka_on": true,
- "duka_filter": [
-  "t:USDJPY:2023-11-30:0-24"
- ],
- "duka_jobs": 1,
- "duka_id0": 40,
+ "duka_jobs": 3,
+ "duka_id0": 50,
  "duka": [
   "h1:DOLLARIDXUSD:2021",
   "h1:DOLLARIDXUSD:2022",
