@@ -1,15 +1,15 @@
 {
- "run": 8,
+ "run": 9,
  "probe": false,
  "misc": false,
  "yahoo": false,
  "duka_on": true,
  "duka_filter": [
-  "t:EURNZD:2015-01-15:6-16",
-  "t:AUDNZD:2015-01-15:6-16",
-  "t:USDJPY:2015-01-15:6-16"
+  "t:AUDJPY:2024-08-05:0-9",
+  "t:USDJPY:2023-11-30:0-24",
+  "t:CHFJPY:2023-11-30:0-24"
  ],
- "duka_jobs": 1,
+ "duka_jobs": 2,
  "duka_id0": 20,
  "duka": [
   "h1:DOLLARIDXUSD:2021",

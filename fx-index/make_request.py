@@ -55,9 +55,10 @@ def main():
     # take them from the end (own job ids 10-12, "duka_reverse"); every job now skips items that
     # another run has already uploaded, so the two runs meet in the middle.
     # Run 8: three SNB items (EURNZD, AUDNZD, USDJPY) failed in run 1 without a file; one job (id 20).
-    req = {"run": 8, "probe": False, "misc": False, "yahoo": False, "duka_on": True,
-           "duka_filter": [f"t:{p}:2015-01-15:6-16" for p in ["EURNZD", "AUDNZD", "USDJPY"]],
-           "duka_jobs": 1, "duka_id0": 20,
+    # Run 9: AUDJPY 2024-08-05 failed in run 1; USDJPY and CHFJPY 2023-11-30 have missing hours (run 7).
+    req = {"run": 9, "probe": False, "misc": False, "yahoo": False, "duka_on": True,
+           "duka_filter": ["t:AUDJPY:2024-08-05:0-9", "t:USDJPY:2023-11-30:0-24", "t:CHFJPY:2023-11-30:0-24"],
+           "duka_jobs": 2, "duka_id0": 20,
            "duka": items,
            "second": {"source": "exness", "months": ["2024-08", "2025-04", "2026-09"], "symbols": PAIRS}}
     if "--forward" in sys.argv:
