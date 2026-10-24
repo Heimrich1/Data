@@ -52,11 +52,12 @@ def main():
     # now stored partially with a list of missing days; two jobs, the tick items stay with run 1.
     # Run 6: Yahoo has no DX=F any more ("possibly delisted"); the ICE index DX-Y.NYB instead.
     # Run 7: the calibration days would not finish within the budget of run 1. Three more jobs
-    # take them from the end (own job ids 10-12); every job now skips items that another run
-    # has already uploaded, so the two runs meet in the middle.
-    calib = [f"t:{p}:{day}:0-24" for day in calibration_days() for p in PAIRS]
-    req = {"run": 7, "probe": False, "misc": False, "yahoo": False, "duka_on": True,
-           "duka_filter": calib, "duka_reverse": True, "duka_jobs": 3, "duka_id0": 10,
+    # take them from the end (own job ids 10-12, "duka_reverse"); every job now skips items that
+    # another run has already uploaded, so the two runs meet in the middle.
+    # Run 8: three SNB items (EURNZD, AUDNZD, USDJPY) failed in run 1 without a file; one job (id 20).
+    req = {"run": 8, "probe": False, "misc": False, "yahoo": False, "duka_on": True,
+           "duka_filter": [f"t:{p}:2015-01-15:6-16" for p in ["EURNZD", "AUDNZD", "USDJPY"]],
+           "duka_jobs": 1, "duka_id0": 20,
            "duka": items,
            "second": {"source": "exness", "months": ["2024-08", "2025-04", "2026-09"], "symbols": PAIRS}}
     if "--forward" in sys.argv:
