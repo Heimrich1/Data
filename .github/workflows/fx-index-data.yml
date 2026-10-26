@@ -1,0 +1,164 @@
+name: FX-Index-Rohdaten (RDT-Test 48)
+
+# Holt die Rohdaten für den Devisen-Marktindex (Test 48 in Heimrich1/RDT), die
+# Cloud-Sessions nicht selbst laden können (ihr Proxy antwortet mit 403):
+# Dukascopy-Ticks und -Kerzen, eine zweite Tick-Quelle (FXCM oder Exness),
+# Yahoo (CME-Devisenfutures, ICE-Dollar-Index-Future), FRED, BIS-Triennial,
+# Fed- und BLS-Kalender. Was geladen wird, steht in fx-index/request.json.
+# Jede fertige Datei landet sofort im Release "fx-index"; ein neuer Lauf
+# überspringt, was dort schon liegt. Details: scripts/fx_index_fetch.py.
+#
+# Start: Push einer geänderten fx-index/request.json (auch auf Session-Branches)
+# oder von Hand. Dukascopy drosselt GitHub-Rechner (siehe fx-data.yml); die drei
+# Dukascopy-Jobs teilen sich die Drosselung mit fx-data.yml.
+
+on:
+  push:
+    paths: ["fx-index/request.json"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Keine Sperre für den ganzen Workflow: Ein neuer Lauf (z. B. nur Zweitquelle)
+# soll nicht stundenlang auf laufende Dukascopy-Jobs warten. Nur gleich
+# nummerierte Dukascopy-Jobs verschiedener Läufe warten aufeinander.
+
+env:
+  RELEASE_TAG: fx-index
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+      second: ${{ steps.plan.outputs.second }}
+      nsecond: ${{ steps.plan.outputs.nsecond }}
+      probe: ${{ steps.plan.outputs.probe }}
+      misc: ${{ steps.plan.outputs.misc }}
+      yahoo: ${{ steps.plan.outputs.yahoo }}
+      yahoo_symbols: ${{ steps.plan.outputs.yahoo_symbols }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Release anlegen und offene Einträge planen
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pip install --quiet pandas pyarrow
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || \
+            gh release create "$RELEASE_TAG" --latest=false --target main \
+              --title "FX-Index-Rohdaten (RDT-Test 48)" \
+              --notes "Rohdaten für den Devisen-Marktindex (Test 48 in Heimrich1/RDT): Dukascopy-Ticks und -Kerzen, Zweitquelle, Yahoo, FRED, BIS, Fed, BLS. Erzeugt von .github/workflows/fx-index-data.yml."
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq .id)
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$id/assets?per_page=100" \
+            --jq '.[] | [.name, .updated_at, (.size | tostring)] | @tsv' > assets.tsv
+          python3 scripts/fx_index_fetch.py plan --request fx-index/request.json --assets assets.tsv --jobs 3 >> "$GITHUB_OUTPUT"
+
+  probe:
+    needs: plan
+    if: needs.plan.outputs.probe == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Quellen prüfen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pip install --quiet pandas pyarrow
+          python3 scripts/fx_index_fetch.py probe --upload "$RELEASE_TAG"
+
+  misc:
+    needs: plan
+    if: needs.plan.outputs.misc == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: FRED, Fed, BIS, BLS (Wayback), FT
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pip install --quiet pandas pyarrow
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq .id)
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$id/assets?per_page=100" \
+            --jq '.[] | [.name, .updated_at, (.size | tostring)] | @tsv' > assets.tsv
+          python3 scripts/fx_index_fetch.py misc --assets assets.tsv --upload "$RELEASE_TAG"
+
+  yahoo:
+    needs: plan
+    if: needs.plan.outputs.yahoo == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Yahoo (CME-Devisenfutures, ICE DX)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pip install --quiet pandas pyarrow yfinance
+          python3 scripts/fx_index_fetch.py yahoo --symbols "${{ needs.plan.outputs.yahoo_symbols }}" --upload "$RELEASE_TAG"
+
+  duka:
+    needs: plan
+    if: needs.plan.outputs.count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    concurrency:
+      group: fx-index-duka-${{ matrix.job.id }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        job: ${{ fromJson(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Dukascopy-Job ${{ matrix.job.id }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ITEMS: ${{ matrix.job.items }}
+        run: |
+          pip install --quiet pandas pyarrow
+          echo "$ITEMS" | tr ',' '\n' | head -50
+          FX_PATIENCE=1200 python3 scripts/fx_index_fetch.py duka --items "$ITEMS" --budget-min 330 --upload "$RELEASE_TAG"
+
+  second:
+    needs: plan
+    if: needs.plan.outputs.nsecond != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        job: ${{ fromJson(needs.plan.outputs.second) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Zweitquelle ${{ matrix.job.source }} ${{ matrix.job.month }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pip install --quiet pandas pyarrow
+          python3 scripts/fx_index_fetch.py second --source "${{ matrix.job.source }}" \
+            --month "${{ matrix.job.month }}" --symbols "${{ matrix.job.symbols }}" --upload "$RELEASE_TAG"
