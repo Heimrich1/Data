@@ -34,6 +34,8 @@ env:
 jobs:
   mitschreiben:
     runs-on: ubuntu-latest
+    # QUOTEN_TOKEN darf als Repository-Secret oder in dieser Umgebung liegen
+    environment: QUOTEN_TOKEN
     timeout-minutes: 140
     steps:
       - id: checkout
