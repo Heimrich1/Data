@@ -36,7 +36,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 140
     steps:
-      - uses: actions/checkout@v4
+      - id: checkout
+        uses: actions/checkout@v4
         with:
           repository: ${{ env.QUELL_REPO }}
           ref: ${{ env.DATEN_BRANCH }}
@@ -69,7 +70,7 @@ jobs:
           done
 
       - name: Commit und Push nach Repo 1
-        if: always()
+        if: always() && steps.checkout.outcome == 'success'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
