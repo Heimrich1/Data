@@ -32,7 +32,7 @@ on:
         required: false
         default: "h1,m1"
       years:
-        description: "Nur diese Jahre, z. B. 2025 oder 2003-2010 (leer = vorübergehend 2013-2026)"
+        description: "Nur diese Jahre, z. B. 2025 oder 2003-2010 (leer = vorübergehend 2013,2006,2005,2004,2003)"
         required: false
         default: ""
       full:
@@ -69,9 +69,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SYMBOLS: ${{ inputs.symbols }}
           TFS: ${{ inputs.tfs || 'h1,m1' }}
-          # Vorübergehend nur 2013–2026: 2003–2012 lädt der Nutzer vom eigenen
-          # PC (keine GitHub-Drosselung). Danach den Standard wieder entfernen.
-          YEARS: ${{ inputs.years || '2013-2026' }}
+          # Vorübergehend nur 2013 und 2003–2006: 2014–2026 ist fertig, 2007–2012
+          # lädt eine Cloud-Session. Wenn alles da ist, den Standard wieder entfernen
+          # (dann repariert der Planer auch die .missing.txt vor 2013).
+          YEARS: ${{ inputs.years || '2013,2006,2005,2004,2003' }}
           FULL: ${{ inputs.full }}
         run: |
           pip install --quiet pandas pyarrow
