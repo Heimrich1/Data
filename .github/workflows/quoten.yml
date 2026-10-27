@@ -1,0 +1,98 @@
+name: Quoten mitschreiben (Pferdewetten)
+
+# Schreibt die Siegquoten aller Rennen vor dem Start mit
+# (werkzeuge/quoten_mitschreiben.py im privaten Repo Heimrich1/1).
+# Code und Daten bleiben privat: Der Lauf holt Repo 1 mit dem Secret
+# QUOTEN_TOKEN (fine-grained Token, nur Heimrich1/1, Contents: Read and write)
+# und committet die Quoten dort auf den Daten-Branch. Hier läuft er nur, weil
+# Actions-Minuten in diesem öffentlichen Repo kostenlos sind. Die Logs sind
+# öffentlich; sie zeigen nur Rennen und Starterzahlen.
+#
+# Je Lauf ein Teilstück von 110 Minuten. Läuft stündlich (ein Lauf, der noch
+# läuft, lässt den nächsten warten); zusätzlich stößt jeder Lauf den nächsten
+# selbst an (Job „next“), weil GitHub stündliche Zeitpläne oft ausfallen lässt.
+# Ab 22 Uhr wird der nächste Tag schon mitgenommen, damit die Rennen ab 0 Uhr
+# nicht fehlen.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "7 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quoten
+  cancel-in-progress: false
+
+env:
+  QUELL_REPO: Heimrich1/1
+  DATEN_BRANCH: ccr-ed19b00c-50tbdm
+  TZ: Europe/Berlin
+
+jobs:
+  mitschreiben:
+    runs-on: ubuntu-latest
+    timeout-minutes: 140
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.QUELL_REPO }}
+          ref: ${{ env.DATEN_BRANCH }}
+          token: ${{ secrets.QUOTEN_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Abhängigkeiten
+        run: pip install --quiet requests pandas
+
+      - name: Teilstück mitschreiben
+        run: |
+          set +e
+          python werkzeuge/quoten_mitschreiben.py --tag heute --max-minuten 110 &
+          heute=$!
+          morgen=
+          if [ "$(date +%-H)" -ge 22 ]; then
+            python werkzeuge/quoten_mitschreiben.py --tag morgen --max-minuten 110 &
+            morgen=$!
+          fi
+          wait $heute; r1=$?
+          r2=0
+          if [ -n "$morgen" ]; then wait $morgen; r2=$?; fi
+          echo "Exit heute=$r1 morgen=$r2"
+          # 0 = Tag fertig, 3 = Teilstück zu Ende; alles andere ist ein Fehler
+          for r in $r1 $r2; do
+            if [ "$r" != 0 ] && [ "$r" != 3 ]; then exit "$r"; fi
+          done
+
+      - name: Commit und Push nach Repo 1
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add daten/quoten
+          if git diff --cached --quiet; then echo "keine neuen Quoten"; exit 0; fi
+          git commit -m "Quoten vor dem Start $(date +%F) (Action)"
+          for warte in 2 4 8 16 0; do
+            git pull --rebase origin "$DATEN_BRANCH" && git push origin "HEAD:$DATEN_BRANCH" && exit 0
+            git rebase --abort 2>/dev/null
+            sleep "$warte"
+          done
+          exit 1
+
+  next:
+    needs: mitschreiben
+    # nur nach Erfolg, sonst dreht sich ein Fehler (z. B. fehlendes Secret) im Kreis;
+    # nach einem Fehler greift der stündliche Zeitplan
+    if: needs.mitschreiben.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Nächsten Lauf anstoßen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run quoten.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"
