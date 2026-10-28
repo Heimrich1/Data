@@ -32,7 +32,7 @@ on:
         required: false
         default: "h1,m1"
       years:
-        description: "Nur diese Jahre, z. B. 2025 oder 2003-2010 (leer = vorübergehend 2013,2006,2005,2004,2003)"
+        description: "Nur diese Jahre, z. B. 2025 oder 2003-2010 (leer = vorübergehend 2022-2026,2013,2003-2006)"
         required: false
         default: ""
       full:
@@ -69,10 +69,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SYMBOLS: ${{ inputs.symbols }}
           TFS: ${{ inputs.tfs || 'h1,m1' }}
-          # Vorübergehend nur 2013 und 2003–2006: 2014–2026 ist fertig, 2007–2012
-          # lädt eine Cloud-Session. Wenn alles da ist, den Standard wieder entfernen
-          # (dann repariert der Planer auch die .missing.txt vor 2013).
-          YEARS: ${{ inputs.years || '2013,2006,2005,2004,2003' }}
+          # Vorübergehend ohne 2007–2012, die lädt eine Cloud-Session. 2022–2026
+          # sind dabei, weil XAUUSD dort am 28.10. aus dem Release verschwand.
+          # Wenn alles da ist, den Standard wieder entfernen (dann repariert der
+          # Planer auch die .missing.txt vor 2013).
+          YEARS: ${{ inputs.years || '2026,2025,2024,2023,2022,2013,2006,2005,2004,2003' }}
           FULL: ${{ inputs.full }}
         run: |
           pip install --quiet pandas pyarrow
