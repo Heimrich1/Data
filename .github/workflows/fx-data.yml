@@ -12,13 +12,12 @@ name: FX-Daten (Dukascopy M1/H1)
 # letzte Lauf aufgehört hat. Ein Job schafft ~0,06 Dateien/s, also ein volles
 # M1-Jahr in ~3 h; ein Lauf dauert deshalb meist nur ~3 h.
 #
-# Läuft stündlich (ein Lauf, der noch läuft, lässt den nächsten warten; so
-# beginnt nach einem ~3-h-Lauf der nächste spätestens 1 h später; zusätzlich
-# stößt jeder erfolgreiche Lauf den nächsten selbst an, Job „next“),
-# bis alles geladen ist; danach wird nur noch das
-# laufende Jahr wöchentlich erneuert (Planer überspringt Fertiges).
-# Actions-Minuten sind kostenlos, solange das Repo öffentlich ist. Wird es
-# privat gestellt, den Zeitplan unten vorher entfernen!
+# Läuft nur per Hand (Actions → „FX-Daten“ → „Run workflow“). Jeder
+# erfolgreiche Lauf mit offenen Einträgen stößt den nächsten selbst an (Job
+# „next“), bis nichts mehr offen ist. Seit dem 2026-10-29 ist die Historie
+# 2003–2026 vollständig und der Zeitplan entfernt; ein Lauf von Hand frischt
+# das laufende Jahr auf, wenn es älter als 7 Tage ist.
+# Actions-Minuten sind kostenlos, solange das Repo öffentlich ist.
 
 on:
   workflow_dispatch:
@@ -39,8 +38,6 @@ on:
         description: "Ausgewählte Einträge neu laden"
         type: boolean
         default: false
-  schedule:
-    - cron: "17 * * * *"
 
 permissions:
   contents: write
@@ -109,9 +106,8 @@ jobs:
           echo "$ITEMS" | tr ',' '\n'
           python3 scripts/fx_fetch.py --items "$ITEMS" --budget-min 320 --upload "$RELEASE_TAG"
 
-  # GitHub lässt stündliche Zeitpläne oft ausfallen (21./22.10.: bis zu 3 h
-  # Pause zwischen Läufen). Deshalb stößt ein erfolgreicher Lauf mit offenen
-  # Einträgen den nächsten selbst an; er wartet, bis dieser Lauf zu Ende ist.
+  # Ein erfolgreicher Lauf mit offenen Einträgen stößt den nächsten selbst an;
+  # er wartet, bis dieser Lauf zu Ende ist.
   next:
     needs: [plan, fetch]
     if: needs.plan.outputs.count != '0' && needs.fetch.result == 'success'
