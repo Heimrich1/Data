@@ -3,8 +3,9 @@ name: Aktien-Daten aktualisieren (Alpaca)
 # Holt die neuen Handelstage seit dem Datenstand im Release "stock-data"
 # (Tageskerzen, 1/5/30-Minute, Schlagzeilen, Quartalszahlen-Termine) und
 # ersetzt die geänderten Dateien im Release. Details: scripts/stock_update.py.
-# Braucht die Repository-Secrets APCA_API_KEY_ID und APCA_API_SECRET_KEY;
-# ohne sie wird der Lauf übersprungen.
+# Läuft nur per Hand (seit 2026-10-29 kein Zeitplan mehr). Braucht die
+# Repository-Secrets APCA_API_KEY_ID und APCA_API_SECRET_KEY; ohne sie wird
+# der Lauf übersprungen.
 
 on:
   workflow_dispatch:
@@ -13,8 +14,6 @@ on:
         description: "Letzter Tag (YYYY-MM-DD), leer = letzter vollständiger Handelstag"
         required: false
         default: ""
-  schedule:
-    - cron: "41 6 * * 6"   # samstags 06:41 UTC
 
 permissions:
   contents: write
